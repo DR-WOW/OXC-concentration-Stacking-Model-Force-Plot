@@ -43,7 +43,7 @@ except Exception as e:
 
 
 # Load SHAP values
-shap_values_path = "最终stacking_shap_df3.xlsx"
+shap_values_path = "Final_stacking_shap_df3.xlsx"
 try:
     stacking_shap_df3 = pd.read_excel(shap_values_path, index_col=0)
     st.success("SHAP values loaded successfully!")
