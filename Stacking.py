@@ -37,19 +37,27 @@ model_path = "stacking_regressor_model.pkl"
 try:
     stacking_regressor = joblib.load(model_path)
     st.success("Model loaded successfully!")
+except FileNotFoundError:
+    st.error("Model file not found. Please check the file path.")
+    st.stop()
+except EOFError:
+    st.error("Model file is incomplete or corrupted. Please re-generate the model file.")
+    st.stop()
 except Exception as e:
     st.error(f"Failed to load model: {e}")
-    raise  # Re-raise the exception for debugging
-
+    st.stop()
 
 # Load SHAP values
 shap_values_path = "Final_stacking_shap_df3.xlsx"
 try:
     stacking_shap_df3 = pd.read_excel(shap_values_path, index_col=0)
     st.success("SHAP values loaded successfully!")
+except FileNotFoundError:
+    st.error("SHAP values file not found. Please check the file path.")
+    st.stop()
 except Exception as e:
     st.error(f"Failed to load SHAP values: {e}")
-    raise
+    st.stop()
 
 # Load test features and labels
 test_features_path = "test_features.csv"
@@ -58,9 +66,12 @@ try:
     test_features = pd.read_csv(test_features_path)
     test_labels = pd.read_csv(test_labels_path)
     st.success("Test data loaded successfully!")
+except FileNotFoundError:
+    st.error("Test data files not found. Please check the file paths.")
+    st.stop()
 except Exception as e:
     st.error(f"Failed to load test data: {e}")
-    raise
+    st.stop()
 
 # Set page title
 st.title("📊 Stacking Model Prediction and SHAP Visualization")
