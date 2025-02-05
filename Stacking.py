@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
+from PIL import Image
 import joblib
 import shap
 import matplotlib.pyplot as plt
@@ -8,46 +9,37 @@ import matplotlib.pyplot as plt
 # Ensure st.set_page_config is called at the beginning of the script
 st.set_page_config(layout="wide", page_title="Stacking Model Prediction and SHAP Visualization", page_icon="📊")
 
+# Import custom classes
+from sklearn.base import RegressorMixin, BaseEstimator
+from pytorch_tabnet.tab_model import TabNetRegressor
+
+# Define the TabNetRegressorWrapper class
+class TabNetRegressorWrapper(RegressorMixin, BaseEstimator):
+    def __init__(self, **kwargs):
+        self.model = TabNetRegressor(**kwargs)
+    
+    def fit(self, X, y, **kwargs):
+        # Convert X to a NumPy array
+        X = X.values if isinstance(X, pd.DataFrame) else X
+        # Convert y to a NumPy array and ensure it is two-dimensional
+        y = y.values if isinstance(y, pd.Series) else y
+        y = y.reshape(-1, 1)  # Ensure y is two-dimensional
+        self.model.fit(X, y, **kwargs)
+        return self
+    
+    def predict(self, X, **kwargs):
+        # Convert X to a NumPy array
+        X = X.values if isinstance(X, pd.DataFrame) else X
+        return self.model.predict(X, **kwargs).flatten()  # Flatten the prediction result to a one-dimensional array
+
 # Load the model
 model_path = "stacking_regressor_model.pkl"
 try:
     stacking_regressor = joblib.load(model_path)
     st.success("Model loaded successfully!")
-except FileNotFoundError:
-    st.error("Model file not found. Please check the file path.")
-    st.stop()
-except EOFError:
-    st.error("Model file is incomplete or corrupted. Please re-generate the model file.")
-    st.stop()
 except Exception as e:
     st.error(f"Failed to load model: {e}")
-    st.stop()
-
-# Load SHAP values
-shap_values_path = "Final_stacking_shap_df3.xlsx"
-try:
-    stacking_shap_df3 = pd.read_excel(shap_values_path, index_col=0)
-    st.success("SHAP values loaded successfully!")
-except FileNotFoundError:
-    st.error("SHAP values file not found. Please check the file path.")
-    st.stop()
-except Exception as e:
-    st.error(f"Failed to load SHAP values: {e}")
-    st.stop()
-
-# Load test features and labels
-test_features_path = "test_features.csv"
-test_labels_path = "test_labels.csv"
-try:
-    test_features = pd.read_csv(test_features_path)
-    test_labels = pd.read_csv(test_labels_path)
-    st.success("Test data loaded successfully!")
-except FileNotFoundError:
-    st.error("Test data files not found. Please check the file paths.")
-    st.stop()
-except Exception as e:
-    st.error(f"Failed to load test data: {e}")
-    st.stop()
+    raise  # Re-raise the exception for debugging
 
 # Set page title
 st.title("📊 Stacking Model Prediction and SHAP Visualization")
@@ -73,6 +65,9 @@ AST = st.sidebar.number_input("Aspartate transaminase (AST) (U/L)", min_value=0.
 CL = st.sidebar.number_input("Metabolic clearance of drugs (CL) (L/h)", min_value=0.1, max_value=100.0, value=3.85)
 V = st.sidebar.number_input("Apparent volume of distribution (Vd) (L)", min_value=0.1, max_value=1000.0, value=10.0)
 
+# Add an input for the true value
+TRUE_VALUE = st.sidebar.number_input("True Value (mg/L)", min_value=0.0, max_value=1000.0, value=0.0)
+
 # Add prediction button
 predict_button = st.sidebar.button("Predict")
 
@@ -88,6 +83,11 @@ if predict_button:
             prediction = 0.1  # Set a small positive value if prediction is non-positive
         
         st.success(f"Prediction result: {prediction:.2f} mg/L")
+        
+        # Calculate prediction accuracy if true value is provided
+        if TRUE_VALUE > 0:
+            accuracy = 1 - abs(prediction - TRUE_VALUE) / TRUE_VALUE
+            st.success(f"Prediction accuracy: {accuracy:.2%}")
     except Exception as e:
         st.error(f"Error during prediction: {e}")
 
@@ -97,40 +97,35 @@ st.write("""
 The following charts display the model's SHAP analysis results, including the feature contributions of the first-layer base learners, the second-layer meta-learner, and the overall Stacking model.
 """)
 
+# SHAP visualization for the first-layer base learners
+st.subheader("1. First-layer Base Learners")
+st.write("Feature contribution analysis of the base learners (GBDT, XGBoost, LightGBM, CatBoost, TabNet, LASSO, etc.)")
+first_layer_img = "SHAP Feature Importance of Base Learners in the First Layer of Stacking Model.png"
+try:
+    img1 = Image.open(first_layer_img)
+    st.image(img1, caption="SHAP contribution analysis of the first-layer base learners", use_column_width=True)
+except FileNotFoundError:
+    st.warning("SHAP image file for the first-layer base learners not found.")
+
+# SHAP visualization for the second-layer meta-learner
+st.subheader("2. Second-layer Meta-Learner")
+st.write("Feature contribution analysis of the meta-learner (Linear Regression)")
+meta_layer_img = "SHAP Contribution Analysis for the Meta-Learner in the Second Layer of Stacking Regressor.png"
+try:
+    img2 = Image.open(meta_layer_img)
+    st.image(img2, caption="SHAP contribution analysis of the second-layer meta-learner", use_column_width=True)
+except FileNotFoundError:
+    st.warning("SHAP image file for the second-layer meta-learner not found.")
+
 # SHAP visualization for the overall Stacking model
-st.subheader("1. Overall Stacking Model SHAP Summary Plot")
+st.subheader("3. Overall Stacking Model")
+st.write("Feature contribution analysis of the overall Stacking model")
+overall_img = "Based on the overall feature contribution analysis of SHAP to the stacking model.png"
 try:
-    explainer = shap.KernelExplainer(stacking_regressor.predict, test_features)
-    shap_values = explainer.shap_values(test_features)
-    shap.summary_plot(shap_values, test_features)
-    st.pyplot()
-except Exception as e:
-    st.error(f"Failed to generate SHAP summary plot: {e}")
-
-# SHAP visualization for a single sample using Force Plot
-st.subheader("2. SHAP Force Plot for a Single Sample")
-sample_index = st.slider("Select a sample index", 0, len(test_features) - 1, 0)
-try:
-    shap.force_plot(explainer.expected_value, shap_values[sample_index, :], test_features.iloc[sample_index, :])
-    st.write("Note: Force Plot may not render properly in Streamlit. Open the HTML file generated by SHAP for full interactivity.")
-except Exception as e:
-    st.error(f"Failed to generate SHAP force plot: {e}")
-
-# Prediction accuracy plot
-st.subheader("3. Prediction Accuracy Plot")
-try:
-    y_pred = stacking_regressor.predict(test_features)
-    y_true = test_labels.values.flatten()
-
-    plt.figure(figsize=(10, 6))
-    plt.scatter(y_true, y_pred, alpha=0.6)
-    plt.plot([min(y_true), max(y_true)], [min(y_true), max(y_true)], color='red', linestyle='--')
-    plt.xlabel("True Values")
-    plt.ylabel("Predicted Values")
-    plt.title("Prediction Accuracy Plot")
-    st.pyplot()
-except Exception as e:
-    st.error(f"Failed to generate prediction accuracy plot: {e}")
+    img3 = Image.open(overall_img)
+    st.image(img3, caption="SHAP contribution analysis of the overall Stacking model", use_column_width=True)
+except FileNotFoundError:
+    st.warning("SHAP image file for the overall Stacking model not found.")
 
 # Footer
 st.markdown("---")
@@ -138,7 +133,7 @@ st.header("Summary")
 st.write("""
 Through this page, you can:
 1. Perform real-time predictions using input feature values.
-2. Gain an intuitive understanding of the feature contributions of the overall Stacking model through SHAP analysis.
-3. Visualize the prediction accuracy of the model.
+2. Gain an intuitive understanding of the feature contributions of the first-layer base learners, the second-layer meta-learner, and the overall Stacking model.
+3. Calculate the prediction accuracy when the true value is provided.
 These analyses help to deeply understand the model's prediction logic and the importance of features.
 """)
