@@ -3,100 +3,134 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 import joblib
-from sklearn.linear_model import Lasso
-from pytorch_tabnet.tab_model import TabNetClassifier, TabNetRegressor
+import shap
+import matplotlib.pyplot as plt
 
-# 加载模型
+# Ensure st.set_page_config is called at the beginning of the script
+st.set_page_config(layout="wide", page_title="Stacking Model Prediction and SHAP Visualization", page_icon="📊")
+
+# Import custom classes
+from sklearn.base import RegressorMixin, BaseEstimator
+from pytorch_tabnet.tab_model import TabNetRegressor
+
+# Define the TabNetRegressorWrapper class
+class TabNetRegressorWrapper(RegressorMixin, BaseEstimator):
+    def __init__(self, **kwargs):
+        self.model = TabNetRegressor(**kwargs)
+    
+    def fit(self, X, y, **kwargs):
+        # Convert X to a NumPy array
+        X = X.values if isinstance(X, pd.DataFrame) else X
+        # Convert y to a NumPy array and ensure it is two-dimensional
+        y = y.values if isinstance(y, pd.Series) else y
+        y = y.reshape(-1, 1)  # Ensure y is two-dimensional
+        self.model.fit(X, y, **kwargs)
+        return self
+    
+    def predict(self, X, **kwargs):
+        # Convert X to a NumPy array
+        X = X.values if isinstance(X, pd.DataFrame) else X
+        return self.model.predict(X, **kwargs).flatten()  # Flatten the prediction result to a one-dimensional array
+
+# Load the model
 model_path = "stacking_regressor_model.pkl"
-stacking_regressor = joblib.load(model_path)
+try:
+    stacking_regressor = joblib.load(model_path)
+    st.success("Model loaded successfully!")
+except Exception as e:
+    st.error(f"Failed to load model: {e}")
+    raise  # Re-raise the exception for debugging
 
-# 设置页面配置和标题
-st.set_page_config(layout="wide", page_title="Stacking 模型预测与 SHAP 可视化", page_icon="📊")
-
-st.title("📊 Stacking 模型预测与 SHAP 可视化分析")
+# Set page title
+st.title("📊 Stacking Model Prediction and SHAP Visualization")
 st.write("""
-通过输入特征值进行模型预测，并结合 SHAP 分析结果，了解特征对模型预测的贡献。
+By inputting feature values, you can obtain the model's prediction and understand the contribution of each feature using SHAP analysis.
 """)
 
-# 左侧侧边栏输入区域
-st.sidebar.header("特征输入区域")
-st.sidebar.write("请输入特征值：")
+# Sidebar for feature input
+st.sidebar.header("Feature Input Area")
+st.sidebar.write("Please input feature values:")
 
-# 定义特征输入范围
-SEX = st.sidebar.selectbox("性别 Gender(1 = male, 0 = female)", [0, 1])
-AGE= st.sidebar.number_input("年龄Age (范围: 0.0-18)", min_value=0.0, max_value=18.0, value=5.0)
-WT = st.sidebar.number_input("体重Weight (范围: 0.0-100.0)", min_value=0.0, max_value=100.0, value=25.0)
-Single_Dose = st.sidebar.number_input("单次给药剂量/体重Single_Dose/weight (范围: 0.0-60)", min_value=0.0, max_value=60, value=15.0)
-Daily_Dose = st.sidebar.number_input("日总剂量Daily_Dose (范围: 0.0-2400)", min_value=0.0, max_value=2400, value=450)
-SCR = st.sidebar.number_input("血清肌酐Serum creatinine (范围: 0.0-150.00)", min_value=0.0, max_value=150.0, value=30.0)
-CLCR = st.sidebar.number_input("肌酐清除率Creatinine clearance rate (范围: 0.0-200.00)", min_value=0.0, max_value=200.00, value=90.00)
-BUN = st.sidebar.number_input("血尿素氮 (范围: 0.0-50.0)", min_value=0.0, max_value=50.0, value=5.0)
-ALT = st.sidebar.number_input("丙氨酸氨基转移酶Alanine aminotransferase (ALT) (范围: 0.0-150.0)", min_value=0.0, max_value=150.0, value=18.0)
-AST = st.sidebar.number_input("天冬氨酸氨基转移酶Aspartate transaminase (AST) (范围: 0.0-150.0)", min_value=0.0, max_value=150.0, value=18.0)
-CL = st.sidebar.number_input("药物的代谢清除率 Metabolic clearance of drugs (CL)(范围: 0.0-20.0)", min_value=0.0, max_value=100.0, value=3.85)
-V = st.sidebar.number_input("药物的表观分布容积(Vd)(范围: 0.0-1000.0)", min_value=0.0, max_value=1000.0, value=10.0)
+# Define feature input ranges with units
+SEX = st.sidebar.selectbox("Gender (1 = male, 0 = female)", [0, 1])
+AGE = st.sidebar.number_input("Age (years)", min_value=0.0, max_value=18.0, value=5.0)
+WT = st.sidebar.number_input("Weight (kg)", min_value=0.0, max_value=100.0, value=25.0)
+Single_Dose = st.sidebar.number_input("Single dose per weight (mg/kg)", min_value=0.0, max_value=60.0, value=15.0)
+Daily_Dose = st.sidebar.number_input("Daily dose (mg)", min_value=0.0, max_value=2400.0, value=450.0)
+SCR = st.sidebar.number_input("Serum creatinine (μmol/L)", min_value=0.0, max_value=150.0, value=30.0)
+CLCR = st.sidebar.number_input("Creatinine clearance rate (L/h)", min_value=0.0, max_value=200.0, value=90.0)
+BUN = st.sidebar.number_input("Blood urea nitrogen (mmol/L)", min_value=0.0, max_value=50.0, value=5.0)
+ALT = st.sidebar.number_input("Alanine aminotransferase (ALT) (U/L)", min_value=0.0, max_value=150.0, value=18.0)
+AST = st.sidebar.number_input("Aspartate transaminase (AST) (U/L)", min_value=0.0, max_value=150.0, value=18.0)
+CL = st.sidebar.number_input("Metabolic clearance of drugs (CL) (L/h)", min_value=0.0, max_value=100.0, value=3.85)
+V = st.sidebar.number_input("Apparent volume of distribution (Vd) (L)", min_value=0.0, max_value=1000.0, value=10.0)
 
-# 添加预测按钮
-predict_button = st.sidebar.button("进行预测")
+# Add prediction button
+predict_button = st.sidebar.button("Predict")
 
-# 主页面用于结果展示
+# Main page for result display
 if predict_button:
-    st.header("浓度预测结果(mg/L)")
+    st.header("Prediction Result (mg/L)")
     try:
-        # 将输入特征转换为模型所需格式
-        input_array = np.array([SEX, AGE, WT, Single_Dose,	Daily_Dose, SCR, CLCR,	BUN	,ALT, AST, CL, V]).reshape(1, -1)
-
-
-        # 模型预测
+        input_array = np.array([SEX, AGE, WT, Single_Dose, Daily_Dose, SCR, CLCR, BUN, ALT, AST, CL, V]).reshape(1, -1)
         prediction = stacking_regressor.predict(input_array)[0]
-
-        # 显示预测结果
-        st.success(f"预测结果：{prediction:.2f}")
+        st.success(f"Prediction result: {prediction:.2f} mg/L")
     except Exception as e:
-        st.error(f"预测时发生错误：{e}")
+        st.error(f"Error during prediction: {e}")
 
-# 可视化展示
-st.header("SHAP 可视化分析")
-st.write("""
-以下图表展示了模型的 SHAP 分析结果，包括第一层基学习器、第二层元学习器以及整个 Stacking 模型的特征贡献。
-""")
+    # SHAP analysis
+    try:
+        explainer = shap.Explainer(stacking_regressor)
+        shap_values = explainer(input_array)
 
-# 第一层基学习器 SHAP 可视化
-st.subheader("1. 第一层基学习器")
-st.write("基学习器（GBDT、XGBoost、LightGBM、CatBoost、TabNet、LASSO 等6种算法模型）的特征贡献分析。")
-first_layer_img = "SHAP Feature Importance of Base Learners in the First Layer of Stacking Model.png"
-try:
-    img1 = Image.open(first_layer_img)
-    st.image(img1, caption="第一层基学习器的 SHAP 贡献分析", use_column_width=True)
-except FileNotFoundError:
-    st.warning("未找到第一层基学习器的 SHAP 图像文件。")
+        # SHAP Force Plot
+        st.subheader("SHAP Force Plot")
+        shap.force_plot(explainer.expected_value, shap_values.values[0], input_array[0], feature_names=input_array.columns, show=False)
+        html_output = shap.getjs() + shap.force_plot(explainer.expected_value, shap_values.values[0], input_array[0], feature_names=input_array.columns, show=False).html()
+        st.components.v1.html(html_output, height=400)
 
-# 第二层元学习器 SHAP 可视化
-st.subheader("2. 第二层元学习器")
-st.write("元学习器（Linear Regression）的输入特征贡献分析。")
-meta_layer_img = "SHAP Contribution Analysis for the Meta-Learner in the Second Layer of Stacking Regressor.png"
-try:
-    img2 = Image.open(meta_layer_img)
-    st.image(img2, caption="第二层元学习器的 SHAP 贡献分析", use_column_width=True)
-except FileNotFoundError:
-    st.warning("未找到第二层元学习器的 SHAP 图像文件。")
+    except Exception as e:
+        st.error(f"Error during SHAP visualization: {e}")
 
-# 整体 Stacking 模型 SHAP 可视化
-st.subheader("3. 整体 Stacking 模型")
-st.write("整个 Stacking 模型的特征贡献分析。")
-overall_img = "Based on the overall feature contribution analysis of SHAP to the stacking model.png"
-try:
-    img3 = Image.open(overall_img)
-    st.image(img3, caption="整体 Stacking 模型的 SHAP 贡献分析", use_column_width=True)
-except FileNotFoundError:
-    st.warning("未找到整体 Stacking 模型的 SHAP 图像文件。")
+# Prediction accuracy plot
+true_value = st.sidebar.number_input("True Value (mg/L)", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
+if true_value > 0 and prediction is not None:
+    st.header("Prediction Accuracy")
+    st.write("Display the model's absolute and relative accuracy.")
 
-# 页脚
+    # Calculate absolute and relative accuracy
+    absolute_accuracy = abs(prediction - true_value)
+    relative_accuracy = abs((prediction - true_value) / true_value) * 100 if true_value != 0 else 0
+
+    # Display accuracy metrics
+    st.subheader("Accuracy Metrics")
+    st.write(f"Absolute Accuracy: {absolute_accuracy:.2f} mg/L")
+    st.write(f"Relative Accuracy: {relative_accuracy:.2f}%")
+
+    # Plot scatter plot
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(true_value, prediction, alpha=0.5, color='blue', label='Prediction')
+    ax.plot([0, max(true_value, prediction)], [0, max(true_value, prediction)], color='red', linestyle='--', label='Ideal Line')
+    ax.set_xlabel('True Values (mg/L)')
+    ax.set_ylabel('Predicted Values (mg/L)')
+    ax.set_title('Prediction Accuracy')
+    ax.legend()
+
+    # Add metrics information
+    textstr = '\n'.join((f'Absolute Accuracy: {absolute_accuracy:.2f} mg/L', f'Relative Accuracy: {relative_accuracy:.2f}%'))
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=12, verticalalignment='top', bbox=props)
+
+    # Display the plot
+    st.pyplot(fig)
+
+# Footer
 st.markdown("---")
-st.header("总结")
+st.header("Summary")
 st.write("""
-通过本页面，您可以：
-1. 使用输入特征值进行实时预测。
-2. 直观地理解第一层基学习器、第二层元学习器以及整体 Stacking 模型的特征贡献情况。
-这些分析有助于深入理解模型的预测逻辑和特征的重要性。
+Through this page, you can:
+1. Perform real-time predictions using input feature values.
+2. Gain an intuitive understanding of the feature contributions of the first-layer base learners, the second-layer meta-learner, and the overall Stacking model.
+3. If a true value is provided, the model's absolute and relative accuracy will also be displayed.
+These analyses help to deeply understand the model's prediction logic and the importance of features.
 """)
