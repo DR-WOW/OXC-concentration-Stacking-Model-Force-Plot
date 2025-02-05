@@ -9,6 +9,29 @@ import matplotlib.pyplot as plt
 # Ensure st.set_page_config is called at the beginning of the script
 st.set_page_config(layout="wide", page_title="Stacking Model Prediction and SHAP Visualization", page_icon="📊")
 
+# Import custom classes
+from sklearn.base import RegressorMixin, BaseEstimator
+from pytorch_tabnet.tab_model import TabNetRegressor
+
+# Define the TabNetRegressorWrapper class
+class TabNetRegressorWrapper(RegressorMixin, BaseEstimator):
+    def __init__(self, **kwargs):
+        self.model = TabNetRegressor(**kwargs)
+    
+    def fit(self, X, y, **kwargs):
+        # Convert X to a NumPy array
+        X = X.values if isinstance(X, pd.DataFrame) else X
+        # Convert y to a NumPy array and ensure it is two-dimensional
+        y = y.values if isinstance(y, pd.Series) else y
+        y = y.reshape(-1, 1)  # Ensure y is two-dimensional
+        self.model.fit(X, y, **kwargs)
+        return self
+    
+    def predict(self, X, **kwargs):
+        # Convert X to a NumPy array
+        X = X.values if isinstance(X, pd.DataFrame) else X
+        return self.model.predict(X, **kwargs).flatten()  # Flatten the prediction result to a one-dimensional array
+
 # Load the model
 model_path = "stacking_regressor_model.pkl"
 try:
@@ -17,6 +40,7 @@ try:
 except Exception as e:
     st.error(f"Failed to load model: {e}")
     raise  # Re-raise the exception for debugging
+
 
 # Load SHAP values
 shap_values_path = "最终stacking_shap_df3.xlsx"
