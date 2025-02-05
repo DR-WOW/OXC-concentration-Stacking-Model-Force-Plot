@@ -3,8 +3,8 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 import joblib
-import shap
-import matplotlib.pyplot as plt
+import os
+import dill
 
 # Ensure st.set_page_config is called at the beginning of the script
 st.set_page_config(layout="wide", page_title="Stacking Model Prediction and SHAP Visualization", page_icon="📊")
@@ -34,12 +34,16 @@ class TabNetRegressorWrapper(RegressorMixin, BaseEstimator):
 
 # Load the model
 model_path = "stacking_regressor_model.pkl"
-try:
-    stacking_regressor = joblib.load(model_path)
-    st.success("Model loaded successfully!")
-except Exception as e:
-    st.error(f"Failed to load model: {e}")
-    raise  # Re-raise the exception for debugging
+if not os.path.exists(model_path):
+    st.error(f"Model file not found: {model_path}")
+else:
+    try:
+        stacking_regressor = joblib.load(model_path)
+        st.success("Model loaded successfully!")
+    except EOFError:
+        st.error("Failed to load model: The model file may be corrupted or incompatible.")
+    except Exception as e:
+        st.error(f"Failed to load model: {e}")
 
 # Set page title
 st.title("📊 Stacking Model Prediction and SHAP Visualization")
@@ -105,16 +109,14 @@ try:
 
     # SHAP Summary Plot
     st.subheader("SHAP Summary Plot")
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=(10, 6))
     shap.summary_plot(shap_values, input_array, feature_names=input_array.columns, plot_type="dot", show=False)
-    plt.title("SHAP Values for Each Feature")
     st.pyplot(fig)
 
     # SHAP Feature Importance Plot
     st.subheader("SHAP Feature Importance")
-    fig, ax = plt.subplots(figsize=(4, 3))
+    fig, ax = plt.subplots(figsize=(10, 6))
     shap.summary_plot(shap_values, input_array, feature_names=input_array.columns, plot_type="bar", show=False)
-    plt.title("SHAP Values for Each Feature")
     st.pyplot(fig)
 
 except Exception as e:
