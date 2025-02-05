@@ -154,4 +154,15 @@ try:
     plt.title("Prediction Accuracy Plot")
     st.pyplot()
 except Exception as e:
-    st.error
+    st.error(f"Failed to generate prediction accuracy plot: {e}")
+
+# Footer
+st.markdown("---")
+st.header("Summary")
+st.write("""
+Through this page, you can:
+1. Perform real-time predictions using input feature values.
+2. Gain an intuitive understanding of the feature contributions of the overall Stacking model through SHAP analysis.
+3. Visualize the prediction accuracy of the model.
+These analyses help to deeply understand the model's prediction logic and the importance of features.
+""")
