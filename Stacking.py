@@ -41,9 +41,6 @@ except Exception as e:
     st.error(f"Failed to load model: {e}")
     raise  # Re-raise the exception for debugging
 
-# Extract the best model from GridSearchCV
-best_model = stacking_regressor.best_estimator_
-
 # Set page title
 st.title("📊 Stacking Model Prediction and SHAP Visualization")
 st.write("""
@@ -76,7 +73,7 @@ if predict_button:
     st.header("Prediction Result (mg/L)")
     try:
         input_array = np.array([SEX, AGE, WT, Single_Dose, Daily_Dose, SCR, CLCR, BUN, ALT, AST, CL, V]).reshape(1, -1)
-        prediction = best_model.predict(input_array)[0]
+        prediction = stacking_regressor.predict(input_array)[0]
         
         # Ensure the prediction is positive
         if prediction <= 0:
@@ -96,8 +93,8 @@ The following charts display the model's SHAP analysis results, including the fe
 st.subheader("1. Overall Stacking Model")
 st.write("Feature contribution analysis of the overall Stacking model")
 try:
-    # Use SHAP TreeExplainer for tree-based models
-    explainer = shap.TreeExplainer(best_model)
+    # Use SHAP KernelExplainer for non-tree-based models
+    explainer = shap.KernelExplainer(stacking_regressor.predict, input_array)
     shap_values = explainer.shap_values(input_array)
 
     # SHAP Force Plot
