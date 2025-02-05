@@ -37,7 +37,7 @@ if not os.path.exists(model_path):
     st.error(f"Model file not found: {model_path}")
 else:
     try:
-        stacking_regressor = joblib.load(model_path)
+        stacking_regressor = joblib.load(model_path, mmap_mode='r')
         st.success("Model loaded successfully!")
     except EOFError:
         st.error("Failed to load model: The model file may be corrupted or incompatible.")
