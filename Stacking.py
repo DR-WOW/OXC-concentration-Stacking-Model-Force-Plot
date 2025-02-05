@@ -1,36 +1,11 @@
 import streamlit as st
+import joblib
 import numpy as np
 import pandas as pd
 from PIL import Image
-import joblib
 import shap
 import matplotlib.pyplot as plt
-
-# Ensure st.set_page_config is called at the beginning of the script
-st.set_page_config(layout="wide", page_title="Stacking Model Prediction and SHAP Visualization", page_icon="📊")
-
-# Import custom classes
-from sklearn.base import RegressorMixin, BaseEstimator
-from pytorch_tabnet.tab_model import TabNetRegressor
-
-# Define the TabNetRegressorWrapper class
-class TabNetRegressorWrapper(RegressorMixin, BaseEstimator):
-    def __init__(self, **kwargs):
-        self.model = TabNetRegressor(**kwargs)
-    
-    def fit(self, X, y, **kwargs):
-        # Convert X to a NumPy array
-        X = X.values if isinstance(X, pd.DataFrame) else X
-        # Convert y to a NumPy array and ensure it is two-dimensional
-        y = y.values if isinstance(y, pd.Series) else y
-        y = y.reshape(-1, 1)  # Ensure y is two-dimensional
-        self.model.fit(X, y, **kwargs)
-        return self
-    
-    def predict(self, X, **kwargs):
-        # Convert X to a NumPy array
-        X = X.values if isinstance(X, pd.DataFrame) else X
-        return self.model.predict(X, **kwargs).flatten()  # Flatten the prediction result to a one-dimensional array
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 # Load the model
 model_path = "stacking_regressor_model.pkl"
@@ -41,91 +16,177 @@ except Exception as e:
     st.error(f"Failed to load model: {e}")
     raise  # Re-raise the exception for debugging
 
-# Set page title
-st.title("📊 Stacking Model Prediction and SHAP Visualization")
+# Set page configuration and title
+st.set_page_config(layout="wide", page_title="Concentration Prediction", page_icon="📊")
+st.title("📊 Concentration Prediction and SHAP Visualization")
 st.write("""
-By inputting feature values, you can obtain the model's prediction and understand the contribution of each feature using SHAP analysis.
+By inputting feature values, you can obtain the model's prediction and understand the contribution of each feature using SHAP analysis. 
+
+If a true value is provided, the model's absolute and relative accuracy, as well as precision within ±30% and ±3, will also be displayed.
 """)
 
-# Sidebar for feature input
+# Feature input area
 st.sidebar.header("Feature Input Area")
 st.sidebar.write("Please input feature values:")
 
-# Define feature input ranges with units
-SEX = st.sidebar.selectbox("Gender (1 = male, 0 = female)", [0, 1])
-AGE = st.sidebar.number_input("Age (years)", min_value=0.1, max_value=18.0, value=5.0)
-WT = st.sidebar.number_input("Weight (kg)", min_value=0.1, max_value=100.0, value=25.0)
-Single_Dose = st.sidebar.number_input("Single dose per weight (mg/kg)", min_value=0.1, max_value=60.0, value=15.0)
-Daily_Dose = st.sidebar.number_input("Daily dose (mg)", min_value=0.1, max_value=2400.0, value=450.0)
-SCR = st.sidebar.number_input("Serum creatinine (μmol/L)", min_value=0.1, max_value=150.0, value=30.0)
-CLCR = st.sidebar.number_input("Creatinine clearance rate (L/h)", min_value=0.1, max_value=200.0, value=90.0)
-BUN = st.sidebar.number_input("Blood urea nitrogen (mmol/L)", min_value=0.1, max_value=50.0, value=5.0)
-ALT = st.sidebar.number_input("Alanine aminotransferase (ALT) (U/L)", min_value=0.1, max_value=150.0, value=18.0)
-AST = st.sidebar.number_input("Aspartate transaminase (AST) (U/L)", min_value=0.1, max_value=150.0, value=18.0)
-CL = st.sidebar.number_input("Metabolic clearance of drugs (CL) (L/h)", min_value=0.1, max_value=100.0, value=3.85)
-V = st.sidebar.number_input("Apparent volume of distribution (Vd) (L)", min_value=0.1, max_value=1000.0, value=10.0)
+# Define feature input ranges
+feature_ranges = {
+    "SEX": {"type": "categorical", "options": [0, 1], "default": 0, "description": "Gender (0 = Female, 1 = Male)"},
+    "AGE": {"type": "numerical", "min": 0.0, "max": 18.0, "default": 5.0, "description": "Patient's age (in years)"},
+    "WT": {"type": "numerical", "min": 0.0, "max": 100.0, "default": 25.0, "description": "Patient's weight (kg)"},
+    "Single_Dose": {"type": "numerical", "min": 0.0, "max": 60.0, "default": 15.0, "description": "Single dose of the drug per weight (mg/kg)"},
+    "Daily_Dose": {"type": "numerical", "min": 0.0, "max": 2400.0, "default": 450.0, "description": "Total daily dose of the drug (mg)"},
+    "SCR": {"type": "numerical", "min": 0.0, "max": 150.0, "default": 30.0, "description": "Serum creatinine level (μmol/L)"},
+    "CLCR": {"type": "numerical", "min": 0.0, "max": 200.0, "default": 90.0, "description": "Creatinine clearance rate (L/h)"},
+    "BUN": {"type": "numerical", "min": 0.0, "max": 50.0, "default": 5.0, "description": "Blood urea nitrogen level (mmol/L)"},
+    "ALT": {"type": "numerical", "min": 0.0, "max": 150.0, "default": 18.0, "description": "Alanine aminotransferase level (U/L)"},
+    "AST": {"type": "numerical", "min": 0.0, "max": 150.0, "default": 18.0, "description": "Aspartate transaminase level (U/L)"},
+    "CL": {"type": "numerical", "min": 0.0, "max": 100.0, "default": 3.85, "description": "Metabolic clearance rate of the drug (L/h)"},
+    "V": {"type": "numerical", "min": 0.0, "max": 1000.0, "default": 10.0, "description": "Apparent volume of distribution of the drug (L)"}
+}
 
-# Add an input for the true value
-TRUE_VALUE = st.sidebar.number_input("True Value (mg/L)", min_value=0.0, max_value=1000.0, value=0.0)
+# Dynamically generate the input interface
+inputs = {}
+for feature, config in feature_ranges.items():
+    if config["type"] == "numerical":
+        inputs[feature] = st.sidebar.number_input(
+            f"{feature} ({config['description']})",
+            min_value=config["min"],
+            max_value=config["max"],
+            value=config["default"]
+        )
+    elif config["type"] == "categorical":
+        inputs[feature] = st.sidebar.selectbox(
+            f"{feature} ({config['description']})",
+            options=config["options"],
+            index=config["options"].index(config["default"])
+        )
 
-# Add prediction button
-predict_button = st.sidebar.button("Predict")
+# Add a text box for the true value
+true_value = st.sidebar.number_input("True Value (mg/L)", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
 
-# Main page for result display
-if predict_button:
-    st.header("Prediction Result (mg/L)")
+# Convert the input features to a Pandas DataFrame
+features_df = pd.DataFrame([inputs])
+
+# If the model used categorical features during training, ensure these features are of integer type
+cat_features = ["SEX"]  # Assuming SEX is a categorical feature
+features_df[cat_features] = features_df[cat_features].astype(int)
+
+# Model prediction
+prediction = None  # Initialize prediction to None
+if st.button("Predict"):
     try:
-        input_array = np.array([SEX, AGE, WT, Single_Dose, Daily_Dose, SCR, CLCR, BUN, ALT, AST, CL, V]).reshape(1, -1)
-        prediction = stacking_regressor.predict(input_array)[0]
-        
-        # Ensure the prediction is positive
-        if prediction <= 0:
-            prediction = 0.1  # Set a small positive value if prediction is non-positive
-        
-        st.success(f"Prediction result: {prediction:.2f} mg/L")
-        
-        # Calculate prediction accuracy if true value is provided
-        if TRUE_VALUE > 0:
-            accuracy = 1 - abs(prediction - TRUE_VALUE) / TRUE_VALUE
-            st.success(f"Prediction accuracy: {accuracy:.2%}")
+        prediction = stacking_regressor.predict(features_df)[0]  # Prediction result is a continuous variable
+
+        # Display the prediction result
+        st.header("Prediction Result")
+        st.success(f"Based on the feature values, the predicted concentration is {prediction:.2f} mg/L.")
+
+        # Save the prediction result as an image
+        fig, ax = plt.subplots(figsize=(8, 1))
+        text = f"Predicted Concentration: {prediction:.2f} mg/L"
+        ax.text(
+            0.5, 0.5, text,
+            fontsize=16,
+            ha='center', va='center',
+            fontname='Times New Roman',
+            transform=ax.transAxes
+        )
+        ax.axis('off')
+        plt.savefig("prediction_text.png", bbox_inches='tight', dpi=300)
+        st.image("prediction_text.png", use_column_width=True)
+
+        # Visualization display
+        st.header("SHAP Visualization and Model Prediction Performance Analysis")
+        st.write("""
+        The following charts display the model's SHAP analysis results, including SHAP visualizations of feature contributions.
+        """)
+
+        # Calculate SHAP values
+        try:
+            explainer = shap.TreeExplainer(stacking_regressor)
+            shap_values = explainer.shap_values(features_df)
+
+            # Generate SHAP force plot
+            st.header("1. SHAP Force Plot")
+            html_output = shap.force_plot(
+                explainer.expected_value,
+                shap_values[0, :],
+                features_df.iloc[0, :],
+                show=False
+            )
+            shap_html = f"<head>{shap.getjs()}</head><body>{html_output.html()}</body>"
+            st.components.v1.html(shap_html, height=400)
+
+            # Generate SHAP summary plot
+            st.header("2. SHAP Summary Plot")
+            fig, ax = plt.subplots(figsize=(4, 3))
+            shap.summary_plot(shap_values, features_df, plot_type="dot", show=False)
+            plt.title("SHAP Values for Each Feature")
+            st.pyplot(fig)
+
+            # Generate SHAP feature importance plot
+            st.header("3. SHAP Feature Importance")
+            fig, ax = plt.subplots(figsize=(4, 3))
+            shap.summary_plot(shap_values, features_df, plot_type="bar", show=False)
+            plt.title("SHAP Values for Each Feature")
+            st.pyplot(fig)
+
+            # Generate SHAP decision plot
+            st.header("4. SHAP Decision Plot")
+            fig, ax = plt.subplots(figsize=(4, 3))
+            shap.decision_plot(explainer.expected_value, shap_values[0, :], features_df.iloc[0, :], show=False)
+            plt.title("SHAP Decision Plot")
+            st.pyplot(fig)
+
+        except Exception as e:
+            st.error(f"An error occurred during SHAP visualization: {e}")
+
     except Exception as e:
-        st.error(f"Error during prediction: {e}")
+        st.error(f"An error occurred during prediction: {e}")
 
-# Visualization display
-st.header("SHAP Visualization Analysis")
-st.write("""
-The following charts display the model's SHAP analysis results, including the feature contributions of the first-layer base learners, the second-layer meta-learner, and the overall Stacking model.
-""")
+# Prediction accuracy and precision plot
+if true_value > 0 and prediction is not None:
+    st.header("📊 Prediction Accuracy and Precision")
+    st.write("Display the model's absolute and relative accuracy, as well as precision within ±30% and ±3.")
 
-# SHAP visualization for the first-layer base learners
-st.subheader("1. First-layer Base Learners")
-st.write("Feature contribution analysis of the base learners (GBDT, XGBoost, LightGBM, CatBoost, TabNet, LASSO, etc.)")
-first_layer_img = "SHAP Feature Importance of Base Learners in the First Layer of Stacking Model.png"
-try:
-    img1 = Image.open(first_layer_img)
-    st.image(img1, caption="SHAP contribution analysis of the first-layer base learners", use_column_width=True)
-except FileNotFoundError:
-    st.warning("SHAP image file for the first-layer base learners not found.")
+    # Calculate absolute and relative accuracy
+    absolute_accuracy = abs(prediction - true_value)
+    relative_accuracy = abs((prediction - true_value) / true_value) * 100 if true_value != 0 else 0
 
-# SHAP visualization for the second-layer meta-learner
-st.subheader("2. Second-layer Meta-Learner")
-st.write("Feature contribution analysis of the meta-learner (Linear Regression)")
-meta_layer_img = "SHAP Contribution Analysis for the Meta-Learner in the Second Layer of Stacking Regressor.png"
-try:
-    img2 = Image.open(meta_layer_img)
-    st.image(img2, caption="SHAP contribution analysis of the second-layer meta-learner", use_column_width=True)
-except FileNotFoundError:
-    st.warning("SHAP image file for the second-layer meta-learner not found.")
+    # Calculate precision within ±30% and ±3
+    precision_30_percent = abs(prediction - true_value) <= (0.3 * true_value)
+    precision_3 = abs(prediction - true_value) <= 3
 
-# SHAP visualization for the overall Stacking model
-st.subheader("3. Overall Stacking Model")
-st.write("Feature contribution analysis of the overall Stacking model")
-overall_img = "Based on the overall feature contribution analysis of SHAP to the stacking model.png"
-try:
-    img3 = Image.open(overall_img)
-    st.image(img3, caption="SHAP contribution analysis of the overall Stacking model", use_column_width=True)
-except FileNotFoundError:
-    st.warning("SHAP image file for the overall Stacking model not found.")
+    # Display accuracy and precision metrics
+    st.subheader("Accuracy and Precision Metrics")
+    st.write(f"Absolute Accuracy: {absolute_accuracy:.2f} mg/L")
+    st.write(f"Relative Accuracy: {relative_accuracy:.2f}%")
+    st.write(f"Precision within ±30%: {'Yes' if precision_30_percent else 'No'}")
+    st.write(f"Precision within ±3 mg/L: {'Yes' if precision_3 else 'No'}")
+
+    # Plot scatter plot
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(true_value, prediction, alpha=0.5, color='blue', label='Prediction')
+    ax.plot([0, max(true_value, prediction)], [0, max(true_value, prediction)], color='red', linestyle='--', label='Ideal Line')
+    ax.set_xlabel('True Values (mg/L)')
+    ax.set_ylabel('Predicted Values (mg/L)')
+    ax.set_title('Prediction Accuracy and Precision')
+    ax.legend()
+
+    # Add metrics information
+    textstr = '\n'.join((
+        f'Absolute Accuracy: {absolute_accuracy:.2f} mg/L',
+        f'Relative Accuracy: {relative_accuracy:.2f}%',
+        f'Precision within ±30%: {"Yes" if precision_30_percent else "No"}',
+        f'Precision within ±3 mg/L: {"Yes" if precision_3 else "No"}'
+    ))
+
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=12, verticalalignment='top', bbox=props)
+
+    # Display the plot
+    st.pyplot(fig)
 
 # Footer
 st.markdown("---")
@@ -133,7 +194,7 @@ st.header("Summary")
 st.write("""
 Through this page, you can:
 1. Perform real-time predictions using input feature values.
-2. Gain an intuitive understanding of the feature contributions of the first-layer base learners, the second-layer meta-learner, and the overall Stacking model.
-3. Calculate the prediction accuracy when the true value is provided.
+2. Gain an intuitive understanding of the model's SHAP analysis results, including SHAP visualizations of feature contributions.
+3. If a true value is provided, the model's absolute and relative accuracy, as well as precision within ±30% and ±3, will also be displayed.
 These analyses help to deeply understand the model's prediction logic and the importance of features.
 """)
