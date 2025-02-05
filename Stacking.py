@@ -1,16 +1,21 @@
 import streamlit as st
-import joblib
 import numpy as np
 import pandas as pd
 from PIL import Image
+import joblib
 import shap
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-# 定义 TabNetRegressorWrapper 类
-class TabNetRegressorWrapper:
+# Ensure st.set_page_config is called at the beginning of the script
+st.set_page_config(layout="wide", page_title="Stacking Model Prediction and SHAP Visualization", page_icon="📊")
+
+# Import custom classes
+from sklearn.base import RegressorMixin, BaseEstimator
+from pytorch_tabnet.tab_model import TabNetRegressor
+
+# Define the TabNetRegressorWrapper class
+class TabNetRegressorWrapper(RegressorMixin, BaseEstimator):
     def __init__(self, **kwargs):
-        from pytorch_tabnet.tab_model import TabNetRegressor
         self.model = TabNetRegressor(**kwargs)
     
     def fit(self, X, y, **kwargs):
@@ -27,195 +32,137 @@ class TabNetRegressorWrapper:
         X = X.values if isinstance(X, pd.DataFrame) else X
         return self.model.predict(X, **kwargs).flatten()  # Flatten the prediction result to a one-dimensional array
 
-# 加载模型
+# Load the model
 model_path = "stacking_regressor_model.pkl"
 try:
-    # 确保在加载模型时，TabNetRegressorWrapper 类已经定义
-    model = joblib.load(model_path)
+    stacking_regressor = joblib.load(model_path)
     st.success("Model loaded successfully!")
+except FileNotFoundError:
+    st.error("Model file not found. Please check the file path.")
+    st.stop()
+except EOFError:
+    st.error("Model file is incomplete or corrupted. Please re-generate the model file.")
+    st.stop()
 except Exception as e:
     st.error(f"Failed to load model: {e}")
-    raise  # Re-raise the exception for debugging
+    st.stop()
 
-# 设置页面配置和标题
-st.set_page_config(layout="wide", page_title="Concentration Prediction", page_icon="📊")
-st.title("📊 Concentration Prediction and SHAP Visualization")
+# Load SHAP values
+shap_values_path = "Final_stacking_shap_df3.xlsx"
+try:
+    stacking_shap_df3 = pd.read_excel(shap_values_path, index_col=0)
+    st.success("SHAP values loaded successfully!")
+except FileNotFoundError:
+    st.error("SHAP values file not found. Please check the file path.")
+    st.stop()
+except Exception as e:
+    st.error(f"Failed to load SHAP values: {e}")
+    st.stop()
+
+# Load test features and labels
+test_features_path = "test_features.csv"
+test_labels_path = "test_labels.csv"
+try:
+    test_features = pd.read_csv(test_features_path)
+    test_labels = pd.read_csv(test_labels_path)
+    st.success("Test data loaded successfully!")
+except FileNotFoundError:
+    st.error("Test data files not found. Please check the file paths.")
+    st.stop()
+except Exception as e:
+    st.error(f"Failed to load test data: {e}")
+    st.stop()
+
+# Set page title
+st.title("📊 Stacking Model Prediction and SHAP Visualization")
 st.write("""
-By inputting feature values, you can obtain the model's prediction and understand the contribution of each feature using SHAP analysis. 
-
-If a true value is provided, the model's absolute and relative accuracy, as well as precision within ±30% and ±3, will also be displayed.
+By inputting feature values, you can obtain the model's prediction and understand the contribution of each feature using SHAP analysis.
 """)
 
-# 特征输入区域
+# Sidebar for feature input
 st.sidebar.header("Feature Input Area")
 st.sidebar.write("Please input feature values:")
 
-# 定义特征输入范围
-feature_ranges = {
-    "SEX": {"type": "categorical", "options": [0, 1], "default": 0, "description": "Gender (0 = Female, 1 = Male)"},
-    "AGE": {"type": "numerical", "min": 0.0, "max": 18.0, "default": 5.0, "description": "Patient's age (in years)"},
-    "WT": {"type": "numerical", "min": 0.0, "max": 100.0, "default": 25.0, "description": "Patient's weight (kg)"},
-    "Single_Dose": {"type": "numerical", "min": 0.0, "max": 60.0, "default": 15.0, "description": "Single dose of the drug per weight (mg/kg)"},
-    "Daily_Dose": {"type": "numerical", "min": 0.0, "max": 2400.0, "default": 450.0, "description": "Total daily dose of the drug (mg)"},
-    "SCR": {"type": "numerical", "min": 0.0, "max": 150.0, "default": 30.0, "description": "Serum creatinine level (μmol/L)"},
-    "CLCR": {"type": "numerical", "min": 0.0, "max": 200.0, "default": 90.0, "description": "Creatinine clearance rate (L/h)"},
-    "BUN": {"type": "numerical", "min": 0.0, "max": 50.0, "default": 5.0, "description": "Blood urea nitrogen level (mmol/L)"},
-    "ALT": {"type": "numerical", "min": 0.0, "max": 150.0, "default": 18.0, "description": "Alanine aminotransferase level (U/L)"},
-    "AST": {"type": "numerical", "min": 0.0, "max": 150.0, "default": 18.0, "description": "Aspartate transaminase level (U/L)"},
-    "CL": {"type": "numerical", "min": 0.0, "max": 100.0, "default": 3.85, "description": "Metabolic clearance rate of the drug (L/h)"},
-    "V": {"type": "numerical", "min": 0.0, "max": 1000.0, "default": 10.0, "description": "Apparent volume of distribution of the drug (L)"}
-}
+# Define feature input ranges with units
+SEX = st.sidebar.selectbox("Gender (1 = male, 0 = female)", [0, 1])
+AGE = st.sidebar.number_input("Age (years)", min_value=0.1, max_value=18.0, value=5.0)
+WT = st.sidebar.number_input("Weight (kg)", min_value=0.1, max_value=100.0, value=25.0)
+Single_Dose = st.sidebar.number_input("Single dose per weight (mg/kg)", min_value=0.1, max_value=60.0, value=15.0)
+Daily_Dose = st.sidebar.number_input("Daily dose (mg)", min_value=0.1, max_value=2400.0, value=450.0)
+SCR = st.sidebar.number_input("Serum creatinine (μmol/L)", min_value=0.1, max_value=150.0, value=30.0)
+CLCR = st.sidebar.number_input("Creatinine clearance rate (L/h)", min_value=0.1, max_value=200.0, value=90.0)
+BUN = st.sidebar.number_input("Blood urea nitrogen (mmol/L)", min_value=0.1, max_value=50.0, value=5.0)
+ALT = st.sidebar.number_input("Alanine aminotransferase (ALT) (U/L)", min_value=0.1, max_value=150.0, value=18.0)
+AST = st.sidebar.number_input("Aspartate transaminase (AST) (U/L)", min_value=0.1, max_value=150.0, value=18.0)
+CL = st.sidebar.number_input("Metabolic clearance of drugs (CL) (L/h)", min_value=0.1, max_value=100.0, value=3.85)
+V = st.sidebar.number_input("Apparent volume of distribution (Vd) (L)", min_value=0.1, max_value=1000.0, value=10.0)
 
-# 动态生成输入界面
-inputs = {}
-for feature, config in feature_ranges.items():
-    if config["type"] == "numerical":
-        inputs[feature] = st.sidebar.number_input(
-            f"{feature} ({config['description']})",
-            min_value=config["min"],
-            max_value=config["max"],
-            value=config["default"]
-        )
-    elif config["type"] == "categorical":
-        inputs[feature] = st.sidebar.selectbox(
-            f"{feature} ({config['description']})",
-            options=config["options"],
-            index=config["options"].index(config["default"])
-        )
+# Add prediction button
+predict_button = st.sidebar.button("Predict")
 
-# 添加真实值输入框
-true_value = st.sidebar.number_input("True Value (mg/L)", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
-
-# 将输入特征转换为 Pandas DataFrame
-features_df = pd.DataFrame([inputs])
-
-# 如果模型在训练时使用了分类特征，确保这些特征是整数类型
-cat_features = ["SEX"]  # 假设 SEX 是分类特征
-features_df[cat_features] = features_df[cat_features].astype(int)
-
-# 模型预测
-prediction = None  # 初始化预测结果为 None
-if st.button("Predict"):
+# Main page for result display
+if predict_button:
+    st.header("Prediction Result (mg/L)")
     try:
-        prediction = model.predict(features_df)[0]  # 预测结果是一个连续变量
-
-        # 显示预测结果
-        st.header("Prediction Result")
-        st.success(f"Based on the feature values, the predicted concentration is {prediction:.2f} mg/L.")
-
-        # 保存预测结果为图片
-        fig, ax = plt.subplots(figsize=(8, 1))
-        text = f"Predicted Concentration: {prediction:.2f} mg/L"
-        ax.text(
-            0.5, 0.5, text,
-            fontsize=16,
-            ha='center', va='center',
-            fontname='Times New Roman',
-            transform=ax.transAxes
-        )
-        ax.axis('off')
-        plt.savefig("prediction_text.png", bbox_inches='tight', dpi=300)
-        st.image("prediction_text.png", use_column_width=True)
-
-        # 可视化展示
-        st.header("SHAP Visualization and Model Prediction Performance Analysis")
-        st.write("""
-        The following charts display the model's SHAP analysis results, including SHAP visualizations of feature contributions.
-        """)
-
-        # 计算 SHAP 值
-        try:
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(features_df)
-
-            # 生成 SHAP force plot
-            st.header("1. SHAP Force Plot")
-            html_output = shap.force_plot(
-                explainer.expected_value,
-                shap_values[0, :],
-                features_df.iloc[0, :],
-                show=False
-            )
-            shap_html = f"<head>{shap.getjs()}</head><body>{html_output.html()}</body>"
-            st.components.v1.html(shap_html, height=400)
-
-            # 生成 SHAP summary plot
-            st.header("2. SHAP Summary Plot")
-            fig, ax = plt.subplots(figsize=(4, 3))
-            shap.summary_plot(shap_values, features_df, plot_type="dot", show=False)
-            plt.title("SHAP Values for Each Feature")
-            st.pyplot(fig)
-
-            # 生成 SHAP feature importance plot
-            st.header("3. SHAP Feature Importance")
-            fig, ax = plt.subplots(figsize=(4, 3))
-            shap.summary_plot(shap_values, features_df, plot_type="bar", show=False)
-            plt.title("SHAP Values for Each Feature")
-            st.pyplot(fig)
-
-            # 生成 SHAP decision plot
-            st.header("4. SHAP Decision Plot")
-            fig, ax = plt.subplots(figsize=(4, 3))
-            shap.decision_plot(explainer.expected_value, shap_values[0, :], features_df.iloc[0, :], show=False)
-            plt.title("SHAP Decision Plot")
-            st.pyplot(fig)
-
-        except Exception as e:
-            st.error(f"An error occurred during SHAP visualization: {e}")
-
+        input_array = np.array([SEX, AGE, WT, Single_Dose, Daily_Dose, SCR, CLCR, BUN, ALT, AST, CL, V]).reshape(1, -1)
+        prediction = stacking_regressor.predict(input_array)[0]
+        
+        # Ensure the prediction is positive
+        if prediction <= 0:
+            prediction = 0.1  # Set a small positive value if prediction is non-positive
+        
+        st.success(f"Prediction result: {prediction:.2f} mg/L")
     except Exception as e:
-        st.error(f"An error occurred during prediction: {e}")
+        st.error(f"Error during prediction: {e}")
 
-# 预测精度和精密度图
-if true_value > 0 and prediction is not None:
-    st.header("📊 Prediction Accuracy and Precision")
-    st.write("Display the model's absolute and relative accuracy, as well as precision within ±30% and ±3.")
+# Visualization display
+st.header("SHAP Visualization Analysis")
+st.write("""
+The following charts display the model's SHAP analysis results, including the feature contributions of the first-layer base learners, the second-layer meta-learner, and the overall Stacking model.
+""")
 
-    # 计算绝对和相对精度
-    absolute_accuracy = abs(prediction - true_value)
-    relative_accuracy = abs((prediction - true_value) / true_value) * 100 if true_value != 0 else 0
+# SHAP visualization for the overall Stacking model
+st.subheader("1. Overall Stacking Model SHAP Summary Plot")
+try:
+    explainer = shap.KernelExplainer(stacking_regressor.predict, test_features)
+    shap_values = explainer.shap_values(test_features)
+    shap.summary_plot(shap_values, test_features)
+    st.pyplot()
+except Exception as e:
+    st.error(f"Failed to generate SHAP summary plot: {e}")
 
-    # 计算 ±30% 和 ±3 的精密度
-    precision_30_percent = abs(prediction - true_value) <= (0.3 * true_value)
-    precision_3 = abs(prediction - true_value) <= 3
+# SHAP visualization for a single sample using Force Plot
+st.subheader("2. SHAP Force Plot for a Single Sample")
+sample_index = st.slider("Select a sample index", 0, len(test_features) - 1, 0)
+try:
+    shap.force_plot(explainer.expected_value, shap_values[sample_index, :], test_features.iloc[sample_index, :])
+    st.write("Note: Force Plot may not render properly in Streamlit. Open the HTML file generated by SHAP for full interactivity.")
+except Exception as e:
+    st.error(f"Failed to generate SHAP force plot: {e}")
 
-    # 显示精度和精密度指标
-    st.subheader("Accuracy and Precision Metrics")
-    st.write(f"Absolute Accuracy: {absolute_accuracy:.2f} mg/L")
-    st.write(f"Relative Accuracy: {relative_accuracy:.2f}%")
-    st.write(f"Precision within ±30%: {'Yes' if precision_30_percent else 'No'}")
-    st.write(f"Precision within ±3 mg/L: {'Yes' if precision_3 else 'No'}")
+# Prediction accuracy plot
+st.subheader("3. Prediction Accuracy Plot")
+try:
+    y_pred = stacking_regressor.predict(test_features)
+    y_true = test_labels.values.flatten()
 
-    # 绘制散点图
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.scatter(true_value, prediction, alpha=0.5, color='blue', label='Prediction')
-    ax.plot([0, max(true_value, prediction)], [0, max(true_value, prediction)], color='red', linestyle='--', label='Ideal Line')
-    ax.set_xlabel('True Values (mg/L)')
-    ax.set_ylabel('Predicted Values (mg/L)')
-    ax.set_title('Prediction Accuracy and Precision')
-    ax.legend()
+    plt.figure(figsize=(10, 6))
+    plt.scatter(y_true, y_pred, alpha=0.6)
+    plt.plot([min(y_true), max(y_true)], [min(y_true), max(y_true)], color='red', linestyle='--')
+    plt.xlabel("True Values")
+    plt.ylabel("Predicted Values")
+    plt.title("Prediction Accuracy Plot")
+    st.pyplot()
+except Exception as e:
+    st.error(f"Failed to generate prediction accuracy plot: {e}")
 
-    # 添加指标信息
-    textstr = '\n'.join((
-        f'Absolute Accuracy: {absolute_accuracy:.2f} mg/L',
-        f'Relative Accuracy: {relative_accuracy:.2f}%',
-        f'Precision within ±30%: {"Yes" if precision_30_percent else "No"}',
-        f'Precision within ±3 mg/L: {"Yes" if precision_3 else "No"}'
-    ))
-
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=12, verticalalignment='top', bbox=props)
-
-    # 显示图表
-    st.pyplot(fig)
-
-# 页脚
+# Footer
 st.markdown("---")
 st.header("Summary")
 st.write("""
 Through this page, you can:
 1. Perform real-time predictions using input feature values.
-2. Gain an intuitive understanding of the model's SHAP analysis results, including SHAP visualizations of feature contributions.
-3. If a true value is provided, the model's absolute and relative accuracy, as well as precision within ±30% and ±3, will also be displayed.
+2. Gain an intuitive understanding of the feature contributions of the overall Stacking model through SHAP analysis.
+3. Visualize the prediction accuracy of the model.
 These analyses help to deeply understand the model's prediction logic and the importance of features.
 """)
