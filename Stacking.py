@@ -47,31 +47,7 @@ except Exception as e:
     st.error(f"Failed to load model: {e}")
     st.stop()
 
-# Load SHAP values
-shap_values_path = "Final_stacking_shap_df3.xlsx"
-try:
-    stacking_shap_df3 = pd.read_excel(shap_values_path, index_col=0)
-    st.success("SHAP values loaded successfully!")
-except FileNotFoundError:
-    st.error("SHAP values file not found. Please check the file path.")
-    st.stop()
-except Exception as e:
-    st.error(f"Failed to load SHAP values: {e}")
-    st.stop()
 
-# Load test features and labels
-test_features_path = "test_features.csv"
-test_labels_path = "test_labels.csv"
-try:
-    test_features = pd.read_csv(test_features_path)
-    test_labels = pd.read_csv(test_labels_path)
-    st.success("Test data loaded successfully!")
-except FileNotFoundError:
-    st.error("Test data files not found. Please check the file paths.")
-    st.stop()
-except Exception as e:
-    st.error(f"Failed to load test data: {e}")
-    st.stop()
 
 # Set page title
 st.title("📊 Stacking Model Prediction and SHAP Visualization")
