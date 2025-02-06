@@ -149,7 +149,7 @@ except FileNotFoundError:
 
 # SHAP visualization for the overall Stacking model
 st.subheader("3. Overall Stacking Model")
-st.write("Feature contribution analysis of the overall Stacking model")
+st.write("Feature contribution analysis of the overall Stacking model)")
 overall_img = "Based on the overall feature contribution analysis of SHAP to the stacking model.png"
 try:
     img3 = Image.open(overall_img)
