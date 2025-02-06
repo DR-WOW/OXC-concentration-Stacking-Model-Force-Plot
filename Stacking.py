@@ -59,17 +59,6 @@ except Exception as e:
     st.error(f"Failed to load training features: {e}")
     st.stop()
 
-# Load test features (for SHAP analysis)
-test_features_path = "test_features.csv"
-try:
-    test_features = pd.read_csv(test_features_path)
-    st.success("Test features loaded successfully!")
-except FileNotFoundError:
-    st.error("Test features file not found. Please check the file path.")
-    st.stop()
-except Exception as e:
-    st.error(f"Failed to load test features: {e}")
-    st.stop()
 
 # Define n_min function
 def n_min(a, b):
